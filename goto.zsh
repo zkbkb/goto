@@ -117,7 +117,8 @@ goto() {
       echo "${_yellow}goto: name '$name' is already in use. Choose a different name.${_reset}" >&2
       return 1
     fi
-    echo "$name|$dir" >> "$config"
+    local short="${dir/#$HOME/~}"
+    echo "$name|$short" >> "$config"
     echo "${_green}added:${_reset} $name -> $dir"
     return
   fi
@@ -172,7 +173,7 @@ goto() {
         continue
       fi
       local path="${line#*|}"
-      local full="${path/#\~/$HOME}"
+      local full="${path/#~/$HOME}"
       if [[ -d "$full" ]]; then
         echo "$line" >> "$tmpfile"
       else
@@ -299,7 +300,7 @@ goto() {
           local count
           count=$(grep -c "  ${path}$" "$logfile" 2>/dev/null)
           count=${count:-0}
-          local short="${path/#$HOME/\~}"
+          local short="${path/#$HOME/~}"
           printf "%06d\t%-12s >  %s\n" "$count" "$name" "$short"
         done \
       | sort -t$'\t' -k1 -rn \
