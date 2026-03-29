@@ -1,7 +1,6 @@
 # goto directory config
-# format: alias|path (one per line, # for comments)
+# format: name|path (one per line, # for comments)
 
 Desktop|~/Desktop
 Downloads|~/Downloads
 Documents|~/Documents
-MyTools|~/Documents/devs/我的实用小工具

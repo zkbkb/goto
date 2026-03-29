@@ -1,4 +1,4 @@
-GOTO_VERSION="0.3.0"
+GOTO_VERSION="0.4.0"
 
 goto() {
   local config="${GOTO_CONFIG:-$HOME/.config/goto/dirs}"
@@ -15,6 +15,8 @@ goto() {
     echo "Usage:"
     echo "  goto                     pick a directory to jump to"
     echo "  goto add <path> [name]   add a directory (default name: dirname)"
+    echo "  goto rm [name]           remove a directory (fzf picker if no name)"
+    echo "  goto list                list all saved directories"
     echo "  goto scan                scan shell history for frequent dirs"
     echo "  goto scan --all/-a       include missing directories (strikethrough)"
     echo "  goto scan --dry/-d       print scan results without interactive picker"
@@ -47,6 +49,13 @@ goto() {
     return
   fi
 
+  if [[ "$1" == "list" ]]; then
+    grep -v '^#' "$config" | grep -v '^$' \
+      | sed "s|$HOME|~|g" \
+      | awk -F'|' '{printf "%-12s >  %s\n", $1, $2}'
+    return
+  fi
+
   if [[ "$1" == "add" ]]; then
     local target="${2:-.}"
     local dir=$(builtin cd "$target" 2>/dev/null && pwd -P)
@@ -61,6 +70,39 @@ goto() {
     fi
     echo "$name|$dir" >> "$config"
     echo "added: $name -> $dir"
+    return
+  fi
+
+  if [[ "$1" == "rm" || "$1" == "remove" ]]; then
+    if [[ -n "$2" ]]; then
+      if grep -q "^$2|" "$config"; then
+        local entry=$(grep "^$2|" "$config")
+        sed -i '' "/^$2|/d" "$config"
+        echo "removed: $entry"
+      else
+        echo "goto: not found: $2" >&2
+        return 1
+      fi
+    else
+      if ! command -v fzf >/dev/null 2>&1; then
+        echo "goto: fzf is required for interactive selection. Install: brew install fzf" >&2
+        return 1
+      fi
+      local picks
+      picks=$(grep -v '^#' "$config" | grep -v '^$' \
+        | sed "s|$HOME|~|g" \
+        | awk -F'|' '{printf "%-12s >  %s\n", $1, $2}' \
+        | fzf --prompt='rm > TAB to multi-select, Enter to remove > ' --multi --height=~50% --reverse --no-info)
+      if [[ -z "$picks" ]]; then
+        echo "goto: nothing selected"
+        return
+      fi
+      echo "$picks" | while IFS= read -r line; do
+        local name="${line%%[[:space:]]*}"
+        sed -i '' "/^$name|/d" "$config"
+        echo "removed: $name"
+      done
+    fi
     return
   fi
 
@@ -79,13 +121,14 @@ goto() {
       return 1
     fi
 
-    # extract cd targets, normalize to absolute paths, rank by frequency
+    # extract cd targets, normalise to absolute paths, rank by frequency
     local existing
     existing=$(sed "s|~|$HOME|g" "$config" | grep -v '^#' | grep -v '^$' | awk -F'|' '{print $2}')
 
     local scan_output
     scan_output=$(export LC_ALL=en_US.UTF-8; { \
       grep '^cd ' "$histfile" 2>/dev/null | sed 's/^cd //;s/[[:space:]]*$//' 2>/dev/null | sed "s|^~|$HOME|" 2>/dev/null; \
+      grep ';cd ' "$histfile" 2>/dev/null | sed 's/^.*;\s*cd //;s/[[:space:]]*$//' 2>/dev/null | sed "s|^~|$HOME|" 2>/dev/null; \
       [[ -f "$logfile" ]] && sed 's/^[0-9-]* [0-9:]* *//' "$logfile" 2>/dev/null; \
       } \
       | sort | uniq -c | sort -rn \
@@ -104,6 +147,11 @@ goto() {
     if $dry_run; then
       echo "$scan_output"
       return
+    fi
+
+    if ! command -v fzf >/dev/null 2>&1; then
+      echo "goto: fzf is required for interactive selection. Install: brew install fzf" >&2
+      return 1
     fi
 
     local picks
@@ -125,6 +173,11 @@ goto() {
       echo "added: $name -> $dir"
     done
     return
+  fi
+
+  if ! command -v fzf >/dev/null 2>&1; then
+    echo "goto: fzf is required. Install: brew install fzf" >&2
+    return 1
   fi
 
   local selected
