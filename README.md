@@ -12,9 +12,9 @@ I built `goto` to solve this: bookmarked shortcuts for the directories you visit
 
 ## What it does
 
-Save your current directory with `goto add`, jump directly by name with `goto <name>`, or open the interactive picker with a bare `goto`.
+Save directories with `goto add`, jump by name with `goto <name>`, or open the interactive picker with a bare `goto`. The `fzf` picker previews directory contents and sorts your bookmarks by jump frequency. `goto scan` can bootstrap your list by importing frequent directories from your shell history.
 
-The `fzf` picker previews directory contents and automatically sorts your bookmarks by jump frequency. Don't want to add them manually? Run `goto scan` to discover your most-visited folders directly from your shell history. Everything is governed by a single config file and features full tab-completion.
+Settings and directory list live in a single, human-readable config file (`~/.config/goto/config`) that you can version control, edit by hand, or sync across machines. Full zsh tab-completion included.
 
 ## Requirements
 
@@ -60,43 +60,20 @@ goto help                Show help
 ### Examples
 
 ```bash
-# jump directly by name
-goto Desktop
-
-# add the current directory
-goto add .
-
-# add a specific directory with a custom name
-goto add ~/Projects/my-app app
-
-# remove a directory by name
-goto rm app
-
-# remove interactively (fzf multi-select)
-goto rm
-
-# list everything without fzf
-goto list
-
-# clean up entries where directories have been deleted
-goto clean
-
-# scan history, pick the dirs you visit most
-goto scan
-
-# open the fuzzy picker (sorted by jump frequency)
-goto
+goto add .                        # bookmark current directory
+goto add ~/Projects/my-app app    # bookmark with a custom name
+goto app                          # jump directly by name
+goto                              # open fuzzy picker (sorted by frequency)
+goto scan                         # import frequent dirs from shell history
 ```
 
 ## Configuration
 
-Everything lives in a single file at `~/.config/goto/config` (override with `GOTO_CONFIG` env var).
-
-The file has two types of lines:
+Everything lives in `~/.config/goto/config` (override with `GOTO_CONFIG` env var). The file has three kinds of lines:
 
 - **Settings** -- `GOTO_*=value` lines that control tool behaviour.
 - **Directories** -- `name|path` lines that define jump targets.
-- **Comments** -- Lines starting with `#` are ignored.
+- **Comments** -- lines starting with `#` are ignored.
 
 ### Example config
 
@@ -136,6 +113,10 @@ Projects|~/Projects
 | `GOTO_COLOR`      | `true`                  | Coloured terminal output                       |
 | `GOTO_FZF_OPTS`   | *(empty)*               | Extra options appended to all fzf calls        |
 | `GOTO_CONFIG`     | `~/.config/goto/config` | Config file path (set as env var, not in file) |
+
+## See also
+
+Shortly after publishing this I discovered [zoxide](https://github.com/ajeetdsouza/zoxide), which does the same job but learns your habits automatically. So yes, I reinvented the wheel. That said, if you still prefer the explicit, curated approach, well, here we are.
 
 ## Licence
 
