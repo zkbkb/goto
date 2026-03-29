@@ -53,7 +53,7 @@ goto() {
       | sed "s|^~|$HOME|" 2>/dev/null \
       | sort | uniq -c | sort -rn \
       | while read -r count dir; do
-          [[ -z "$dir" ]] && continue
+          [[ -z "$dir" || "$dir" == "$HOME" ]] && continue
           local short="${dir/#$HOME/~}"
           local tag=""
           if ! [[ -d "$dir" ]]; then
