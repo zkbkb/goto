@@ -212,8 +212,8 @@ goto() {
 
     local scan_output
     scan_output=$(export LC_ALL=en_US.UTF-8; { \
-      grep '^cd ' "$histfile" 2>/dev/null | sed 's/^cd //;s/[[:space:]]*$//' 2>/dev/null | sed "s|^~|$HOME|" 2>/dev/null; \
-      grep ';cd ' "$histfile" 2>/dev/null | sed 's/^.*;\s*cd //;s/[[:space:]]*$//' 2>/dev/null | sed "s|^~|$HOME|" 2>/dev/null; \
+      grep -a '^cd ' "$histfile" 2>/dev/null | sed 's/^cd //;s/[[:space:]]*$//' | sed "s|^~|$HOME|"; \
+      grep -a ';cd ' "$histfile" 2>/dev/null | sed 's/^.*;//;s/^[[:space:]]*cd[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed "s|^~|$HOME|"; \
       [[ -f "$logfile" ]] && sed 's/^[0-9-]* [0-9:]* *//' "$logfile" 2>/dev/null; \
       } \
       | sort | uniq -c | sort -rn \
@@ -297,7 +297,7 @@ goto() {
     display=$(_goto_dirs \
       | sed "s|~|$HOME|g" \
       | while IFS='|' read -r name path; do
-          local count
+          local count=0
           count=$(grep -c "  ${path}$" "$logfile" 2>/dev/null)
           count=${count:-0}
           local short="${path/#$HOME/~}"
