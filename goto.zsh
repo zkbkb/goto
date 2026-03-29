@@ -110,8 +110,18 @@ goto() {
     fi
     local name="${3:-${dir##*/}}"
     if _goto_dirs | sed "s|~|$HOME|g" | grep -qF "|$dir"; then
-      echo "${_yellow}goto: already exists: $dir${_reset}" >&2
-      return 1
+      # path exists — check if the user is renaming it
+      local old_name=$(_goto_dirs | sed "s|~|$HOME|g" | grep -F "|$dir" | head -1 | awk -F'|' '{print $1}')
+      if [[ -n "$3" && "$3" != "$old_name" ]]; then
+        # rename: remove old entry and add with new name
+        awk -v name="$old_name" -F'|' '!(NF>1 && $1==name)' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
+        local short="${dir/#$HOME/~}"
+        echo "$name|$short" >> "$config"
+        echo "${_green}renamed:${_reset} $old_name -> $name ($dir)"
+      else
+        echo "${_yellow}goto: already exists: $dir (as '$old_name')${_reset}" >&2
+      fi
+      return
     fi
     if _goto_dirs | grep -q "^${name}|"; then
       echo "${_yellow}goto: name '$name' is already in use. Choose a different name.${_reset}" >&2
@@ -125,9 +135,9 @@ goto() {
 
   if [[ "$1" == "rm" || "$1" == "remove" ]]; then
     if [[ -n "$2" ]]; then
-      if grep -q "^$2|" "$config"; then
-        local entry=$(grep "^$2|" "$config")
-        sed -i '' "/^$2|/d" "$config"
+      if grep -q "^${2}|" "$config"; then
+        local entry=$(grep "^${2}|" "$config")
+        awk -v name="$2" -F'|' '!(NF>1 && $1==name)' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
         echo "${_red}removed:${_reset} $entry"
       else
         echo "${_red}goto: not found: $2${_reset}" >&2
@@ -151,7 +161,7 @@ goto() {
       fi
       echo "$picks" | while IFS= read -r line; do
         local name="${line%%[[:space:]]*}"
-        sed -i '' "/^${name}|/d" "$config"
+        awk -v name="$name" -F'|' '!(NF>1 && $1==name)' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
         echo "${_red}removed:${_reset} $name"
       done
     fi
@@ -252,7 +262,7 @@ goto() {
     echo "$picks" | while IFS= read -r line; do
       echo "$line" | grep -q '\[added\]' && continue
       local dir="${line#*x  }"
-      local full="${dir/#\~/$HOME}"
+      local full="${dir/#~/$HOME}"
       [[ -d "$full" ]] || continue
       local name="${full##*/}"
       echo "$name|$dir" >> "$config"
@@ -267,7 +277,7 @@ goto() {
     match=$(_goto_dirs | grep "^$1|" | head -1)
     if [[ -n "$match" ]]; then
       local dir="${match#*|}"
-      dir="${dir/#\~/$HOME}"
+      dir="${dir/#~/$HOME}"
       if [[ -d "$dir" ]]; then
         _goto_log_jump "$dir"
         cd "$dir" || return 1
@@ -275,7 +285,7 @@ goto() {
         echo "${_red}goto: directory no longer exists: $dir${_reset}" >&2
         read -r "answer?Remove '$1' from config? [y/N] "
         if [[ "$answer" =~ ^[Yy]$ ]]; then
-          sed -i '' "/^$1|/d" "$config"
+          awk -v name="$1" -F'|' '!(NF>1 && $1==name)' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
           echo "${_red}removed:${_reset} $1"
         fi
         return 1
@@ -321,7 +331,7 @@ goto() {
 
   if [[ -n "$selected" ]]; then
     local dir="${selected#*>  }"
-    dir="${dir/#\~/$HOME}"
+    dir="${dir/#~/$HOME}"
     if [[ -d "$dir" ]]; then
       _goto_log_jump "$dir"
       cd "$dir" || return 1
@@ -330,7 +340,7 @@ goto() {
       local name="${selected%%[[:space:]]*}"
       read -r "answer?Remove '$name' from config? [y/N] "
       if [[ "$answer" =~ ^[Yy]$ ]]; then
-        sed -i '' "/^${name}|/d" "$config"
+        awk -v name="$name" -F'|' '!(NF>1 && $1==name)' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
         echo "${_red}removed:${_reset} $name"
       fi
       return 1
