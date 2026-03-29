@@ -110,9 +110,16 @@ Projects|~/Projects
 | `GOTO_FZF_HEIGHT` | `~50%`                  | fzf window height                              |
 | `GOTO_PREVIEW`    | `true`                  | Show directory contents preview in fzf         |
 | `GOTO_LOG_MAX`    | `1000`                  | Max log entries to keep (0 = unlimited)        |
+| `GOTO_LOGFILE`    | `same dir as config`    | Log file path                                   |
 | `GOTO_COLOR`      | `true`                  | Coloured terminal output                       |
 | `GOTO_FZF_OPTS`   | *(empty)*               | Extra options appended to all fzf calls        |
 | `GOTO_CONFIG`     | `~/.config/goto/config` | Config file path (set as env var, not in file) |
+
+## Testing
+
+```bash
+zsh tests/smoke.zsh
+```
 
 ## See also
 

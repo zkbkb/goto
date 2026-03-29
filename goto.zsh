@@ -1,13 +1,38 @@
-GOTO_VERSION="0.5.0"
+GOTO_VERSION="0.5.1"
 
-goto() {
-  local config="${GOTO_CONFIG:-$HOME/.config/goto/config}"
-  local logfile="$HOME/.config/goto/log"
-
-  # load settings from config (only GOTO_* variable assignments)
+_goto_load_settings() {
+  local config="$1"
   if [[ -f "$config" ]]; then
     source <(grep '^GOTO_[A-Z_]*=' "$config" 2>/dev/null)
   fi
+}
+
+_goto_expand_path() {
+  print -r -- "${1/#\~/$HOME}"
+}
+
+_goto_normalize_dir() {
+  local dir
+  dir="$(_goto_expand_path "$1")"
+  local GOTO_SKIP_CHPWD=1
+  builtin cd "$dir" 2>/dev/null && pwd -P
+}
+
+_goto_shorten_path() {
+  print -r -- "${1/#$HOME/~}"
+}
+
+_goto_logfile_for_config() {
+  local config="$1"
+  print -r -- "${GOTO_LOGFILE:-${config:h}/log}"
+}
+
+goto() {
+  local config="${GOTO_CONFIG:-$HOME/.config/goto/config}"
+
+  # load settings from config (only GOTO_* variable assignments)
+  _goto_load_settings "$config"
+  local logfile="$(_goto_logfile_for_config "$config")"
 
   # configurable defaults
   local fzf_height="${GOTO_FZF_HEIGHT:-~50%}"
@@ -26,12 +51,60 @@ goto() {
 
   # helper: read directory entries from config (lines containing |, excluding comments)
   _goto_dirs() {
-    grep -v '^#' "$config" | grep -v '^$' | grep '|'
+    awk -F'|' '!/^[[:space:]]*#/ && !/^[[:space:]]*$/ && NF > 1 {print}' "$config"
   }
 
-  # helper: write a jump to the log and trim if needed
-  _goto_log_jump() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S')  $1" >> "$logfile"
+  # helper: find a saved entry by exact name
+  _goto_find_by_name() {
+    awk -F'|' -v name="$1" '$1 == name {print; exit}' "$config"
+  }
+
+  # helper: find a saved entry by normalised path
+  _goto_find_by_path() {
+    local needle="$1"
+    local normalized_needle
+    normalized_needle="$(_goto_normalize_dir "$needle")"
+    [[ -z "$normalized_needle" ]] && normalized_needle="$(_goto_expand_path "$needle")"
+    local name saved_dir full
+    while IFS='|' read -r name saved_dir; do
+      full="$(_goto_normalize_dir "$saved_dir")"
+      [[ -z "$full" ]] && full="$(_goto_expand_path "$saved_dir")"
+      if [[ "$full" == "$normalized_needle" ]]; then
+        print -r -- "$name|$saved_dir"
+        return 0
+      fi
+    done < <(_goto_dirs)
+    return 1
+  }
+
+  # helper: remove an entry by exact name
+  _goto_remove_name() {
+    awk -v name="$1" -F'|' '!(NF > 1 && $1 == name)' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
+  }
+
+  # helper: return success if a name is already used
+  _goto_name_exists() {
+    [[ -n "$(_goto_find_by_name "$1")" ]]
+  }
+
+  # helper: generate a unique name for auto-added entries
+  _goto_unique_name() {
+    local base="$1"
+    local candidate="$base"
+    local suffix=2
+    while _goto_name_exists "$candidate"; do
+      candidate="${base}-${suffix}"
+      ((suffix++))
+    done
+    print -r -- "$candidate"
+  }
+
+  # helper: write an action to the log and trim if needed
+  # format: YYYY-MM-DD HH:MM:SS  [action]  details
+  _goto_log() {
+    local action="$1" detail="$2"
+    mkdir -p "${logfile:h}" 2>/dev/null || return 1
+    print -r -- "$(date '+%Y-%m-%d %H:%M:%S')  [$action]  $detail" >> "$logfile"
     if [[ "$log_max" -gt 0 && -f "$logfile" ]]; then
       local lines=$(wc -l < "$logfile" | tr -d ' ')
       if (( lines > log_max )); then
@@ -45,7 +118,7 @@ goto() {
   # helper: build preview args for fzf
   local -a _preview_args=()
   if [[ "$show_preview" == "true" ]]; then
-    _preview_args=(--preview 'dir="$(echo {} | sed "s/.*>  //" | sed "s|~|'"$HOME"'|")"; ls -1pF "$dir" 2>/dev/null || echo "Directory does not exist"')
+    _preview_args=(--preview 'dir="$(printf "%s" {} | awk -F "\t" "{print \$NF}" | sed "s|^~|'"$HOME"'|")"; ls -1pF "$dir" 2>/dev/null || echo "Directory does not exist"')
   fi
 
   if [[ "$1" == "--version" || "$1" == "-v" ]]; then
@@ -109,35 +182,47 @@ goto() {
       return 1
     fi
     local name="${3:-${dir##*/}}"
-    if _goto_dirs | sed "s|~|$HOME|g" | grep -qF "|$dir"; then
+    local existing_entry
+    existing_entry="$(_goto_find_by_path "$dir")"
+    if [[ -n "$existing_entry" ]]; then
       # path exists — check if the user is renaming it
-      local old_name=$(_goto_dirs | sed "s|~|$HOME|g" | grep -F "|$dir" | head -1 | awk -F'|' '{print $1}')
+      local old_name="${existing_entry%%|*}"
       if [[ -n "$3" && "$3" != "$old_name" ]]; then
+        if _goto_name_exists "$name"; then
+          echo "${_yellow}goto: name '$name' is already in use. Choose a different name.${_reset}" >&2
+          return 1
+        fi
         # rename: remove old entry and add with new name
-        awk -v name="$old_name" -F'|' '!(NF>1 && $1==name)' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
-        local short="${dir/#$HOME/~}"
+        _goto_remove_name "$old_name"
+        local short="$(_goto_shorten_path "$dir")"
         echo "$name|$short" >> "$config"
+        _goto_log rename "$old_name -> $name ($dir)"
         echo "${_green}renamed:${_reset} $old_name -> $name ($dir)"
       else
         echo "${_yellow}goto: already exists: $dir (as '$old_name')${_reset}" >&2
       fi
       return
     fi
-    if _goto_dirs | grep -q "^${name}|"; then
-      echo "${_yellow}goto: name '$name' is already in use. Choose a different name.${_reset}" >&2
-      return 1
+    if _goto_name_exists "$name"; then
+      if [[ -n "$3" ]]; then
+        echo "${_yellow}goto: name '$name' is already in use. Choose a different name.${_reset}" >&2
+        return 1
+      fi
+      name="$(_goto_unique_name "$name")"
     fi
-    local short="${dir/#$HOME/~}"
+    local short="$(_goto_shorten_path "$dir")"
     echo "$name|$short" >> "$config"
+    _goto_log add "$name -> $dir"
     echo "${_green}added:${_reset} $name -> $dir"
     return
   fi
 
   if [[ "$1" == "rm" || "$1" == "remove" ]]; then
     if [[ -n "$2" ]]; then
-      if grep -q "^${2}|" "$config"; then
-        local entry=$(grep "^${2}|" "$config")
-        awk -v name="$2" -F'|' '!(NF>1 && $1==name)' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
+      local entry="$(_goto_find_by_name "$2")"
+      if [[ -n "$entry" ]]; then
+        _goto_remove_name "$2"
+        _goto_log rm "$entry"
         echo "${_red}removed:${_reset} $entry"
       else
         echo "${_red}goto: not found: $2${_reset}" >&2
@@ -150,9 +235,11 @@ goto() {
       fi
       local picks
       picks=$(_goto_dirs \
-        | sed "s|$HOME|~|g" \
-        | awk -F'|' '{printf "%-12s >  %s\n", $1, $2}' \
+        | while IFS='|' read -r name saved_dir; do
+            printf "%s\t%s\n" "$name" "$(_goto_shorten_path "$(_goto_expand_path "$saved_dir")")"
+          done \
         | fzf --prompt='rm > TAB to multi-select, Enter to remove > ' --multi \
+              --with-nth=1,2 \
               --height="$fzf_height" --reverse --no-info \
               "${_preview_args[@]}" ${=extra_fzf})
       if [[ -z "$picks" ]]; then
@@ -160,8 +247,12 @@ goto() {
         return
       fi
       echo "$picks" | while IFS= read -r line; do
-        local name="${line%%[[:space:]]*}"
-        awk -v name="$name" -F'|' '!(NF>1 && $1==name)' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
+        local name selected_dir
+        IFS=$'\t' read -r name selected_dir <<< "$line"
+        local entry="$(_goto_find_by_name "$name")"
+        [[ -z "$entry" ]] && continue
+        _goto_remove_name "$name"
+        _goto_log rm "$name"
         echo "${_red}removed:${_reset} $name"
       done
     fi
@@ -182,8 +273,8 @@ goto() {
         echo "$line" >> "$tmpfile"
         continue
       fi
-      local path="${line#*|}"
-      local full="${path/#~/$HOME}"
+      local entry_path="${line#*|}"
+      local full="${entry_path/#\~/$HOME}"
       if [[ -d "$full" ]]; then
         echo "$line" >> "$tmpfile"
       else
@@ -196,6 +287,7 @@ goto() {
       echo "${_green}goto: all entries are valid${_reset}"
     else
       local word; (( cleaned == 1 )) && word="entry" || word="entries"
+      _goto_log clean "removed $cleaned stale $word"
       echo "${_green}cleaned $cleaned stale $word${_reset}"
     fi
     return
@@ -217,22 +309,19 @@ goto() {
     fi
 
     # extract cd targets, normalise to absolute paths, rank by frequency
-    local existing
-    existing=$(_goto_dirs | sed "s|~|$HOME|g" | awk -F'|' '{print $2}')
-
     local scan_output
     scan_output=$(export LC_ALL=en_US.UTF-8; { \
       grep -a '^cd ' "$histfile" 2>/dev/null | sed 's/^cd //;s/[[:space:]]*$//' | sed "s|^~|$HOME|"; \
       grep -a ';cd ' "$histfile" 2>/dev/null | sed 's/^.*;//;s/^[[:space:]]*cd[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed "s|^~|$HOME|"; \
-      [[ -f "$logfile" ]] && sed 's/^[0-9-]* [0-9:]* *//' "$logfile" 2>/dev/null; \
+      [[ -f "$logfile" ]] && grep -E '\[jump\]|\[cd\]' "$logfile" 2>/dev/null | sed 's/^.*\[[^]]*\][[:space:]][[:space:]]*//' ; \
       } \
       | sort | uniq -c | sort -rn \
       | while read -r count dir; do
           [[ -z "$dir" || "$dir" == "$HOME" ]] && continue
-          local short="${dir/#$HOME/~}"
+          local short="$(_goto_shorten_path "$dir")"
           if ! [[ -d "$dir" ]]; then
             $show_all && printf "\033[9m\033[2m%3sx  %s\033[0m\n" "$count" "$short"
-          elif echo "$existing" | grep -qxF "$dir"; then
+          elif [[ -n "$(_goto_find_by_path "$dir")" ]]; then
             printf "\033[32m%3sx  %s [added]\033[0m\n" "$count" "$short"
           else
             printf "%3sx  %s\n" "$count" "$short"
@@ -262,11 +351,16 @@ goto() {
     echo "$picks" | while IFS= read -r line; do
       echo "$line" | grep -q '\[added\]' && continue
       local dir="${line#*x  }"
-      local full="${dir/#~/$HOME}"
+      local full="$(_goto_normalize_dir "$dir")"
+      [[ -z "$full" ]] && full="$(_goto_expand_path "$dir")"
       [[ -d "$full" ]] || continue
       local name="${full##*/}"
-      echo "$name|$dir" >> "$config"
-      echo "${_green}added:${_reset} $name -> $dir"
+      if _goto_name_exists "$name"; then
+        name="$(_goto_unique_name "$name")"
+      fi
+      echo "$name|$(_goto_shorten_path "$full")" >> "$config"
+      _goto_log add "$name -> $full (scan)"
+      echo "${_green}added:${_reset} $name -> $(_goto_shorten_path "$full")"
     done
     return
   fi
@@ -274,18 +368,19 @@ goto() {
   # --- direct jump by name ---
   if [[ -n "$1" ]]; then
     local match
-    match=$(_goto_dirs | grep "^$1|" | head -1)
+    match="$(_goto_find_by_name "$1")"
     if [[ -n "$match" ]]; then
-      local dir="${match#*|}"
-      dir="${dir/#~/$HOME}"
+      local saved_dir="${match#*|}"
+      local dir="$(_goto_normalize_dir "$saved_dir")"
+      [[ -z "$dir" ]] && dir="$(_goto_expand_path "$saved_dir")"
       if [[ -d "$dir" ]]; then
-        _goto_log_jump "$dir"
+        _goto_log jump "$dir"
         cd "$dir" || return 1
       else
         echo "${_red}goto: directory no longer exists: $dir${_reset}" >&2
         read -r "answer?Remove '$1' from config? [y/N] "
         if [[ "$answer" =~ ^[Yy]$ ]]; then
-          awk -v name="$1" -F'|' '!(NF>1 && $1==name)' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
+          _goto_remove_name "$1"
           echo "${_red}removed:${_reset} $1"
         fi
         return 1
@@ -305,42 +400,52 @@ goto() {
   if [[ -f "$logfile" ]]; then
     # sort entries by jump frequency (most frequent first)
     display=$(_goto_dirs \
-      | sed "s|~|$HOME|g" \
-      | while IFS='|' read -r name path; do
+      | while IFS='|' read -r name saved_dir; do
+          local full="$(_goto_normalize_dir "$saved_dir")"
+          [[ -z "$full" ]] && full="$(_goto_expand_path "$saved_dir")"
           local count=0
-          count=$(grep -c "  ${path}$" "$logfile" 2>/dev/null)
+          count=$(awk -v needle="$full" '
+            match($0, /\[(jump|cd)\][[:space:]][[:space:]]*/) {
+              detail = substr($0, RSTART + RLENGTH)
+              if (detail == needle) count++
+            }
+            END { print count + 0 }
+          ' "$logfile" 2>/dev/null)
           count=${count:-0}
-          local short="${path/#$HOME/~}"
-          printf "%06d\t%-12s >  %s\n" "$count" "$name" "$short"
+          printf "%06d\t%s\t%s\n" "$count" "$name" "$(_goto_shorten_path "$full")"
         done \
       | sort -t$'\t' -k1 -rn \
-      | cut -f2-)
+      | cut -f2-3)
   else
     display=$(_goto_dirs \
-      | sed "s|$HOME|~|g" \
-      | awk -F'|' '{printf "%-12s >  %s\n", $1, $2}')
+      | while IFS='|' read -r name saved_dir; do
+          printf "%s\t%s\n" "$name" "$(_goto_shorten_path "$(_goto_expand_path "$saved_dir")")"
+        done)
   fi
 
   local query="${1:-}"
   local selected
   selected=$(echo "$display" \
     | fzf --prompt='goto > ' --no-multi \
+          --with-nth=1,2 \
           --height="$fzf_height" --reverse --no-info \
           --query="$query" \
           "${_preview_args[@]}" ${=extra_fzf})
 
   if [[ -n "$selected" ]]; then
-    local dir="${selected#*>  }"
-    dir="${dir/#~/$HOME}"
+    local name dir
+    IFS=$'\t' read -r name dir <<< "$selected"
+    local raw_dir="$dir"
+    dir="$(_goto_normalize_dir "$raw_dir")"
+    [[ -z "$dir" ]] && dir="$(_goto_expand_path "$raw_dir")"
     if [[ -d "$dir" ]]; then
-      _goto_log_jump "$dir"
+      _goto_log jump "$dir"
       cd "$dir" || return 1
     else
       echo "${_red}goto: directory no longer exists: $dir${_reset}" >&2
-      local name="${selected%%[[:space:]]*}"
       read -r "answer?Remove '$name' from config? [y/N] "
       if [[ "$answer" =~ ^[Yy]$ ]]; then
-        awk -v name="$name" -F'|' '!(NF>1 && $1==name)' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
+        _goto_remove_name "$name"
         echo "${_red}removed:${_reset} $name"
       fi
       return 1
@@ -381,5 +486,24 @@ _goto() {
     esac
   fi
 }
+if (( $+functions[compdef] )); then
+  compdef _goto goto
+fi
 
-compdef _goto goto
+# --- auto-track directory changes ---
+_goto_chpwd_hook() {
+  [[ -n "$GOTO_SKIP_CHPWD" ]] && return 0
+  local config="${GOTO_CONFIG:-$HOME/.config/goto/config}"
+  _goto_load_settings "$config"
+  local logfile="$(_goto_logfile_for_config "$config")"
+  local dir
+  dir=$(pwd -P 2>/dev/null)
+  [[ -z "$dir" ]] && dir="$PWD"
+  mkdir -p "${logfile:h}" 2>/dev/null || return 0
+  print -r -- "$(date '+%Y-%m-%d %H:%M:%S')  [cd]  $dir" >> "$logfile"
+}
+autoload -Uz add-zsh-hook
+if (( $+functions[add-zsh-hook] )); then
+  add-zsh-hook -D chpwd _goto_chpwd_hook 2>/dev/null || true
+  add-zsh-hook chpwd _goto_chpwd_hook 2>/dev/null || true
+fi

@@ -16,6 +16,9 @@
 # Maximum number of log entries to keep; 0 = unlimited (default: 1000)
 # GOTO_LOG_MAX=1000
 
+# Log file path (default: same directory as config, file name `log`)
+# GOTO_LOGFILE="$HOME/.config/goto/log"
+
 # Coloured terminal output (true/false, default: true)
 # GOTO_COLOR=true
 
