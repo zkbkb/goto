@@ -5,13 +5,23 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_DIR="$HOME/.config/goto"
 ZSHRC="$HOME/.zshrc"
 
-# create config directory and copy default config
+# create config directory
 mkdir -p "$CONFIG_DIR"
+
+# copy default directory list
 if [[ ! -f "$CONFIG_DIR/dirs" ]]; then
   cp "$SCRIPT_DIR/dirs" "$CONFIG_DIR/dirs"
-  echo "Created config: $CONFIG_DIR/dirs"
+  echo "Created directory list: $CONFIG_DIR/dirs"
 else
-  echo "Config already exists, skipped: $CONFIG_DIR/dirs"
+  echo "Directory list already exists, skipped: $CONFIG_DIR/dirs"
+fi
+
+# copy default settings
+if [[ ! -f "$CONFIG_DIR/config" ]]; then
+  cp "$SCRIPT_DIR/config" "$CONFIG_DIR/config"
+  echo "Created settings: $CONFIG_DIR/config"
+else
+  echo "Settings already exist, skipped: $CONFIG_DIR/config"
 fi
 
 # add source line to .zshrc if not already present
@@ -30,5 +40,7 @@ echo "Done! Run this to activate:"
 echo "  source ~/.zshrc"
 echo ""
 echo "Usage:"
-echo "  goto        # pick a directory to jump to"
-echo "  goto --edit # edit the directory list"
+echo "  goto           # pick a directory to jump to"
+echo "  goto Desktop   # jump directly by name"
+echo "  goto add .     # add the current directory"
+echo "  goto help      # show all commands"

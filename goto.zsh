@@ -1,11 +1,46 @@
 GOTO_VERSION="0.5.0"
 
 goto() {
+  # load user config
+  local _goto_conf="$HOME/.config/goto/config"
+  [[ -f "$_goto_conf" ]] && source "$_goto_conf"
+
   local config="${GOTO_CONFIG:-$HOME/.config/goto/dirs}"
   local logfile="$HOME/.config/goto/log"
 
-  # colour helpers
-  local _green=$'\033[32m' _red=$'\033[31m' _yellow=$'\033[33m' _dim=$'\033[2m' _reset=$'\033[0m'
+  # configurable defaults
+  local fzf_height="${GOTO_FZF_HEIGHT:-~50%}"
+  local show_preview="${GOTO_PREVIEW:-true}"
+  local log_max="${GOTO_LOG_MAX:-1000}"
+  local use_color="${GOTO_COLOR:-true}"
+  local extra_fzf="${GOTO_FZF_OPTS:-}"
+
+  # colour helpers (respect GOTO_COLOR)
+  local _green _red _yellow _dim _reset
+  if [[ "$use_color" == "true" ]]; then
+    _green=$'\033[32m' _red=$'\033[31m' _yellow=$'\033[33m' _dim=$'\033[2m' _reset=$'\033[0m'
+  else
+    _green="" _red="" _yellow="" _dim="" _reset=""
+  fi
+
+  # helper: write a jump to the log and trim if needed
+  _goto_log_jump() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S')  $1" >> "$logfile"
+    if [[ "$log_max" -gt 0 && -f "$logfile" ]]; then
+      local lines=$(wc -l < "$logfile" | tr -d ' ')
+      if (( lines > log_max )); then
+        local tmpfile=$(mktemp)
+        tail -n "$log_max" "$logfile" > "$tmpfile"
+        mv "$tmpfile" "$logfile"
+      fi
+    fi
+  }
+
+  # helper: build preview args for fzf
+  local -a _preview_args=()
+  if [[ "$show_preview" == "true" ]]; then
+    _preview_args=(--preview 'dir="$(echo {} | sed "s/.*>  //" | sed "s|~|'"$HOME"'|")"; ls -1pF "$dir" 2>/dev/null || echo "Directory does not exist"')
+  fi
 
   if [[ "$1" == "--version" || "$1" == "-v" ]]; then
     echo "goto $GOTO_VERSION"
@@ -30,6 +65,7 @@ goto() {
     echo "  goto help                show this help"
     echo ""
     echo "Config: $config"
+    echo "Settings: $_goto_conf"
     return
   fi
 
@@ -100,8 +136,9 @@ goto() {
       picks=$(grep -v '^#' "$config" | grep -v '^$' \
         | sed "s|$HOME|~|g" \
         | awk -F'|' '{printf "%-12s >  %s\n", $1, $2}' \
-        | fzf --prompt='rm > TAB to multi-select, Enter to remove > ' --multi --height=~50% --reverse --no-info \
-              --preview 'dir="$(echo {} | sed "s/.*>  //" | sed "s|~|'"$HOME"'|")"; ls -1pF "$dir" 2>/dev/null || echo "Directory does not exist"')
+        | fzf --prompt='rm > TAB to multi-select, Enter to remove > ' --multi \
+              --height="$fzf_height" --reverse --no-info \
+              "${_preview_args[@]}" ${=extra_fzf})
       if [[ -z "$picks" ]]; then
         echo "goto: nothing selected"
         return
@@ -136,7 +173,7 @@ goto() {
     if (( cleaned == 0 )); then
       echo "${_green}goto: all entries are valid${_reset}"
     else
-      local word=$(( cleaned == 1 )) && word="entry" || word="entries"
+      local word; (( cleaned == 1 )) && word="entry" || word="entries"
       echo "${_green}cleaned $cleaned stale $word${_reset}"
     fi
     return
@@ -192,7 +229,8 @@ goto() {
 
     local picks
     picks=$(echo "$scan_output" \
-      | fzf --prompt='scan > TAB to multi-select, Enter to add > ' --multi --ansi --height=~50% --reverse --no-info)
+      | fzf --prompt='scan > TAB to multi-select, Enter to add > ' --multi --ansi \
+            --height="$fzf_height" --reverse --no-info ${=extra_fzf})
 
     if [[ -z "$picks" ]]; then
       echo "goto: nothing selected"
@@ -219,7 +257,7 @@ goto() {
       local dir="${match#*|}"
       dir="${dir/#\~/$HOME}"
       if [[ -d "$dir" ]]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S')  $dir" >> "$logfile"
+        _goto_log_jump "$dir"
         cd "$dir" || return 1
       else
         echo "${_red}goto: directory no longer exists: $dir${_reset}" >&2
@@ -264,15 +302,16 @@ goto() {
   local query="${1:-}"
   local selected
   selected=$(echo "$display" \
-    | fzf --prompt='goto > ' --no-multi --height=~50% --reverse --no-info \
+    | fzf --prompt='goto > ' --no-multi \
+          --height="$fzf_height" --reverse --no-info \
           --query="$query" \
-          --preview 'dir="$(echo {} | sed "s/.*>  //" | sed "s|~|'"$HOME"'|")"; ls -1pF "$dir" 2>/dev/null || echo "Directory does not exist"')
+          "${_preview_args[@]}" ${=extra_fzf})
 
   if [[ -n "$selected" ]]; then
     local dir="${selected#*>  }"
     dir="${dir/#\~/$HOME}"
     if [[ -d "$dir" ]]; then
-      echo "$(date '+%Y-%m-%d %H:%M:%S')  $dir" >> "$logfile"
+      _goto_log_jump "$dir"
       cd "$dir" || return 1
     else
       echo "${_red}goto: directory no longer exists: $dir${_reset}" >&2
