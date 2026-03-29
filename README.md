@@ -1,18 +1,20 @@
 # goto
 
-A minimal, zero-dependency directory jumper for zsh. Define shortcuts, pick them with [fzf](https://github.com/junegunn/fzf), and land there instantly.
+A tiny zsh tool for jumping to your frequent directories.
 
-## Features
+## Why goto?
 
-- **Direct jump** -- `goto Desktop` jumps immediately if the name matches; no fzf needed.
-- **Fuzzy picker** -- Plain `goto` opens an fzf list sorted by how often you visit each directory.
-- **Directory preview** -- The fzf picker shows `ls` output so you can verify before jumping.
-- **Quick add & remove** -- `goto add` / `goto rm` with duplicate-name detection.
-- **History scan** -- Import frequently visited directories from shell history (supports both plain and `EXTENDED_HISTORY` formats).
-- **Stale entry handling** -- `goto clean` removes entries pointing to missing directories; the picker also offers to remove stale entries on the spot.
-- **Jump log** -- Every jump is timestamped; review with `goto log`.
-- **Tab completion** -- zsh completions for all subcommands and saved directory names.
-- **Fully configurable** -- fzf height, preview toggle, log limit, colours, and extra fzf options via a simple config file.
+When working in the terminal, finding and copying paths to deeply nested project directories is constantly annoying. You lose your context opening a file manager or blindly searching shell history just to `cd` into a directory.
+
+I built `goto` to solve this: bookmarked shortcuts for the directories you visit most.
+
+`cd ~/deeply/nested/path/to/workplace` → `goto workplace`
+
+## What it does
+
+Save your current directory with `goto add`, jump directly by name with `goto <name>`, or open the interactive picker with a bare `goto`.
+
+The `fzf` picker previews directory contents and automatically sorts your bookmarks by jump frequency. Don't want to add them manually? Run `goto scan` to discover your most-visited folders directly from your shell history. Everything is governed by a single config file and features full tab-completion.
 
 ## Requirements
 
@@ -28,7 +30,7 @@ bash install.sh
 source ~/.zshrc
 ```
 
-`install.sh` creates `~/.config/goto/` with default `dirs` and `config` files, and appends a `source` line to `~/.zshrc`.
+`install.sh` copies the default config to `~/.config/goto/config` and appends a `source` line to `~/.zshrc`.
 
 ## Uninstallation
 
@@ -50,7 +52,7 @@ goto scan                Scan shell history for frequent dirs and add via fzf
 goto scan --all / -a     Include missing directories (shown with strikethrough)
 goto scan --dry / -d     Print scan results without interactive picker
 goto log [n]             Show last n jumps (default: 20)
-goto --edit / -e         Open directory list in $EDITOR
+goto --edit / -e         Open config in $EDITOR
 goto --version / -v      Show version
 goto help                Show help
 ```
@@ -88,26 +90,19 @@ goto
 
 ## Configuration
 
-goto uses two files under `~/.config/goto/`:
+Everything lives in a single file at `~/.config/goto/config` (override with `GOTO_CONFIG` env var).
 
-### Directory list (`dirs`)
+The file has two types of lines:
 
-One entry per line, `name|path`. Lines starting with `#` are comments.
+- **Settings** -- `GOTO_*=value` lines that control tool behaviour.
+- **Directories** -- `name|path` lines that define jump targets.
+- **Comments** -- Lines starting with `#` are ignored.
 
-```text
-# goto directory config
-Desktop|~/Desktop
-Downloads|~/Downloads
-Projects|~/Projects
-```
-
-Override the path with the `GOTO_CONFIG` environment variable.
-
-### Settings (`config`)
-
-A shell file that is sourced on every invocation. All options have sensible defaults; uncomment to override.
+### Example config
 
 ```bash
+# ── Settings ──────────────────────────────────────────────
+
 # fzf window height (default: ~50%)
 # GOTO_FZF_HEIGHT="~50%"
 
@@ -122,7 +117,25 @@ A shell file that is sourced on every invocation. All options have sensible defa
 
 # Additional fzf options appended to every fzf invocation
 # GOTO_FZF_OPTS="--border --margin=1"
+
+# ── Directories ───────────────────────────────────────────
+# Format: name|path
+
+Desktop|~/Desktop
+Downloads|~/Downloads
+Projects|~/Projects
 ```
+
+### Settings reference
+
+| Variable          | Default                 | Description                                    |
+| ----------------- | ----------------------- | ---------------------------------------------- |
+| `GOTO_FZF_HEIGHT` | `~50%`                  | fzf window height                              |
+| `GOTO_PREVIEW`    | `true`                  | Show directory contents preview in fzf         |
+| `GOTO_LOG_MAX`    | `1000`                  | Max log entries to keep (0 = unlimited)        |
+| `GOTO_COLOR`      | `true`                  | Coloured terminal output                       |
+| `GOTO_FZF_OPTS`   | *(empty)*               | Extra options appended to all fzf calls        |
+| `GOTO_CONFIG`     | `~/.config/goto/config` | Config file path (set as env var, not in file) |
 
 ## Licence
 

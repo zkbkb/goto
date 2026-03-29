@@ -1,6 +1,0 @@
-# goto directory config
-# format: name|path (one per line, # for comments)
-
-Desktop|~/Desktop
-Downloads|~/Downloads
-Documents|~/Documents

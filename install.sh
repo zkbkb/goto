@@ -8,20 +8,12 @@ ZSHRC="$HOME/.zshrc"
 # create config directory
 mkdir -p "$CONFIG_DIR"
 
-# copy default directory list
-if [[ ! -f "$CONFIG_DIR/dirs" ]]; then
-  cp "$SCRIPT_DIR/dirs" "$CONFIG_DIR/dirs"
-  echo "Created directory list: $CONFIG_DIR/dirs"
-else
-  echo "Directory list already exists, skipped: $CONFIG_DIR/dirs"
-fi
-
-# copy default settings
+# copy default config (settings + directories)
 if [[ ! -f "$CONFIG_DIR/config" ]]; then
   cp "$SCRIPT_DIR/config" "$CONFIG_DIR/config"
-  echo "Created settings: $CONFIG_DIR/config"
+  echo "Created config: $CONFIG_DIR/config"
 else
-  echo "Settings already exist, skipped: $CONFIG_DIR/config"
+  echo "Config already exists, skipped: $CONFIG_DIR/config"
 fi
 
 # add source line to .zshrc if not already present

@@ -1,11 +1,11 @@
 # goto configuration
 # Location: ~/.config/goto/config
 #
-# This file is sourced by goto on every invocation.
-# Uncomment and edit any line to override the default.
+# Settings: GOTO_*=value lines control tool behaviour.
+# Directories: name|path lines define jump targets.
 
-# Directory config file path (default: ~/.config/goto/dirs)
-# GOTO_CONFIG="$HOME/.config/goto/dirs"
+# ── Settings ──────────────────────────────────────────────
+# Uncomment any line below to override the default.
 
 # fzf window height (default: ~50%)
 # GOTO_FZF_HEIGHT="~50%"
@@ -22,3 +22,10 @@
 # Additional fzf options appended to every fzf invocation
 # Example: GOTO_FZF_OPTS="--border --margin=1"
 # GOTO_FZF_OPTS=""
+
+# ── Directories ───────────────────────────────────────────
+# Format: name|path (one per line)
+
+Desktop|~/Desktop
+Downloads|~/Downloads
+Documents|~/Documents

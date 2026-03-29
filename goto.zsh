@@ -1,12 +1,13 @@
 GOTO_VERSION="0.5.0"
 
 goto() {
-  # load user config
-  local _goto_conf="$HOME/.config/goto/config"
-  [[ -f "$_goto_conf" ]] && source "$_goto_conf"
-
-  local config="${GOTO_CONFIG:-$HOME/.config/goto/dirs}"
+  local config="${GOTO_CONFIG:-$HOME/.config/goto/config}"
   local logfile="$HOME/.config/goto/log"
+
+  # load settings from config (only GOTO_* variable assignments)
+  if [[ -f "$config" ]]; then
+    source <(grep '^GOTO_[A-Z_]*=' "$config" 2>/dev/null)
+  fi
 
   # configurable defaults
   local fzf_height="${GOTO_FZF_HEIGHT:-~50%}"
@@ -22,6 +23,11 @@ goto() {
   else
     _green="" _red="" _yellow="" _dim="" _reset=""
   fi
+
+  # helper: read directory entries from config (lines containing |, excluding comments)
+  _goto_dirs() {
+    grep -v '^#' "$config" | grep -v '^$' | grep '|'
+  }
 
   # helper: write a jump to the log and trim if needed
   _goto_log_jump() {
@@ -65,7 +71,6 @@ goto() {
     echo "  goto help                show this help"
     echo ""
     echo "Config: $config"
-    echo "Settings: $_goto_conf"
     return
   fi
 
@@ -90,7 +95,7 @@ goto() {
   fi
 
   if [[ "$1" == "list" ]]; then
-    grep -v '^#' "$config" | grep -v '^$' \
+    _goto_dirs \
       | sed "s|$HOME|~|g" \
       | awk -F'|' '{printf "%-12s >  %s\n", $1, $2}'
     return
@@ -104,11 +109,11 @@ goto() {
       return 1
     fi
     local name="${3:-${dir##*/}}"
-    if sed "s|~|$HOME|g" "$config" | grep -qF "|$dir"; then
+    if _goto_dirs | sed "s|~|$HOME|g" | grep -qF "|$dir"; then
       echo "${_yellow}goto: already exists: $dir${_reset}" >&2
       return 1
     fi
-    if grep -q "^${name}|" "$config"; then
+    if _goto_dirs | grep -q "^${name}|"; then
       echo "${_yellow}goto: name '$name' is already in use. Choose a different name.${_reset}" >&2
       return 1
     fi
@@ -133,7 +138,7 @@ goto() {
         return 1
       fi
       local picks
-      picks=$(grep -v '^#' "$config" | grep -v '^$' \
+      picks=$(_goto_dirs \
         | sed "s|$HOME|~|g" \
         | awk -F'|' '{printf "%-12s >  %s\n", $1, $2}' \
         | fzf --prompt='rm > TAB to multi-select, Enter to remove > ' --multi \
@@ -156,7 +161,13 @@ goto() {
     local cleaned=0
     local tmpfile=$(mktemp)
     while IFS= read -r line; do
-      if [[ "$line" == \#* || -z "$line" ]]; then
+      # preserve comments, empty lines, and settings
+      if [[ "$line" == \#* || -z "$line" || "$line" == GOTO_* ]]; then
+        echo "$line" >> "$tmpfile"
+        continue
+      fi
+      # skip lines that are not directory entries
+      if [[ "$line" != *"|"* ]]; then
         echo "$line" >> "$tmpfile"
         continue
       fi
@@ -196,7 +207,7 @@ goto() {
 
     # extract cd targets, normalise to absolute paths, rank by frequency
     local existing
-    existing=$(sed "s|~|$HOME|g" "$config" | grep -v '^#' | grep -v '^$' | awk -F'|' '{print $2}')
+    existing=$(_goto_dirs | sed "s|~|$HOME|g" | awk -F'|' '{print $2}')
 
     local scan_output
     scan_output=$(export LC_ALL=en_US.UTF-8; { \
@@ -252,7 +263,7 @@ goto() {
   # --- direct jump by name ---
   if [[ -n "$1" ]]; then
     local match
-    match=$(grep "^$1|" "$config" | head -1)
+    match=$(_goto_dirs | grep "^$1|" | head -1)
     if [[ -n "$match" ]]; then
       local dir="${match#*|}"
       dir="${dir/#\~/$HOME}"
@@ -282,7 +293,7 @@ goto() {
   local display
   if [[ -f "$logfile" ]]; then
     # sort entries by jump frequency (most frequent first)
-    display=$(grep -v '^#' "$config" | grep -v '^$' \
+    display=$(_goto_dirs \
       | sed "s|~|$HOME|g" \
       | while IFS='|' read -r name path; do
           local count
@@ -294,7 +305,7 @@ goto() {
       | sort -t$'\t' -k1 -rn \
       | cut -f2-)
   else
-    display=$(grep -v '^#' "$config" | grep -v '^$' \
+    display=$(_goto_dirs \
       | sed "s|$HOME|~|g" \
       | awk -F'|' '{printf "%-12s >  %s\n", $1, $2}')
   fi
@@ -328,7 +339,7 @@ goto() {
 
 # --- zsh tab completion ---
 _goto() {
-  local config="${GOTO_CONFIG:-$HOME/.config/goto/dirs}"
+  local config="${GOTO_CONFIG:-$HOME/.config/goto/config}"
 
   if (( CURRENT == 2 )); then
     local -a subcmds=(
@@ -342,7 +353,7 @@ _goto() {
     )
     local -a names=()
     if [[ -f "$config" ]]; then
-      names=(${(f)"$(grep -v '^#' "$config" | grep -v '^$' | awk -F'|' '{print $1}')"})
+      names=(${(f)"$(grep -v '^#' "$config" | grep -v '^$' | grep '|' | awk -F'|' '{print $1}')"})
     fi
     _describe 'command' subcmds
     compadd -a names
@@ -353,7 +364,7 @@ _goto() {
       rm|remove)
         local -a names=()
         if [[ -f "$config" ]]; then
-          names=(${(f)"$(grep -v '^#' "$config" | grep -v '^$' | awk -F'|' '{print $1}')"})
+          names=(${(f)"$(grep -v '^#' "$config" | grep -v '^$' | grep '|' | awk -F'|' '{print $1}')"})
         fi
         compadd -a names ;;
     esac
