@@ -1,0 +1,24 @@
+# goto configuration
+# Location: ~/.config/goto/config
+#
+# This file is sourced by goto on every invocation.
+# Uncomment and edit any line to override the default.
+
+# Directory config file path (default: ~/.config/goto/dirs)
+# GOTO_CONFIG="$HOME/.config/goto/dirs"
+
+# fzf window height (default: ~50%)
+# GOTO_FZF_HEIGHT="~50%"
+
+# Show directory preview in fzf picker (true/false, default: true)
+# GOTO_PREVIEW=true
+
+# Maximum number of log entries to keep; 0 = unlimited (default: 1000)
+# GOTO_LOG_MAX=1000
+
+# Coloured terminal output (true/false, default: true)
+# GOTO_COLOR=true
+
+# Additional fzf options appended to every fzf invocation
+# Example: GOTO_FZF_OPTS="--border --margin=1"
+# GOTO_FZF_OPTS=""

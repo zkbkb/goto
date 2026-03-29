@@ -1,8 +1,11 @@
-GOTO_VERSION="0.4.0"
+GOTO_VERSION="0.5.0"
 
 goto() {
   local config="${GOTO_CONFIG:-$HOME/.config/goto/dirs}"
   local logfile="$HOME/.config/goto/log"
+
+  # colour helpers
+  local _green=$'\033[32m' _red=$'\033[31m' _yellow=$'\033[33m' _dim=$'\033[2m' _reset=$'\033[0m'
 
   if [[ "$1" == "--version" || "$1" == "-v" ]]; then
     echo "goto $GOTO_VERSION"
@@ -13,10 +16,11 @@ goto() {
     echo "goto $GOTO_VERSION - quick directory jumper"
     echo ""
     echo "Usage:"
-    echo "  goto                     pick a directory to jump to"
+    echo "  goto [name]              jump directly (or open picker if no match)"
     echo "  goto add <path> [name]   add a directory (default name: dirname)"
     echo "  goto rm [name]           remove a directory (fzf picker if no name)"
     echo "  goto list                list all saved directories"
+    echo "  goto clean               remove stale entries pointing to missing dirs"
     echo "  goto scan                scan shell history for frequent dirs"
     echo "  goto scan --all/-a       include missing directories (strikethrough)"
     echo "  goto scan --dry/-d       print scan results without interactive picker"
@@ -30,7 +34,7 @@ goto() {
   fi
 
   if [[ ! -f "$config" ]]; then
-    echo "goto: config not found: $config" >&2
+    echo "${_red}goto: config not found: $config${_reset}" >&2
     return 1
   fi
 
@@ -60,16 +64,20 @@ goto() {
     local target="${2:-.}"
     local dir=$(builtin cd "$target" 2>/dev/null && pwd -P)
     if [[ -z "$dir" ]]; then
-      echo "goto: not a valid directory: $target" >&2
+      echo "${_red}goto: not a valid directory: $target${_reset}" >&2
       return 1
     fi
     local name="${3:-${dir##*/}}"
     if sed "s|~|$HOME|g" "$config" | grep -qF "|$dir"; then
-      echo "goto: already exists: $dir" >&2
+      echo "${_yellow}goto: already exists: $dir${_reset}" >&2
+      return 1
+    fi
+    if grep -q "^${name}|" "$config"; then
+      echo "${_yellow}goto: name '$name' is already in use. Choose a different name.${_reset}" >&2
       return 1
     fi
     echo "$name|$dir" >> "$config"
-    echo "added: $name -> $dir"
+    echo "${_green}added:${_reset} $name -> $dir"
     return
   fi
 
@@ -78,30 +86,58 @@ goto() {
       if grep -q "^$2|" "$config"; then
         local entry=$(grep "^$2|" "$config")
         sed -i '' "/^$2|/d" "$config"
-        echo "removed: $entry"
+        echo "${_red}removed:${_reset} $entry"
       else
-        echo "goto: not found: $2" >&2
+        echo "${_red}goto: not found: $2${_reset}" >&2
         return 1
       fi
     else
       if ! command -v fzf >/dev/null 2>&1; then
-        echo "goto: fzf is required for interactive selection. Install: brew install fzf" >&2
+        echo "${_red}goto: fzf is required for interactive selection. Install: brew install fzf${_reset}" >&2
         return 1
       fi
       local picks
       picks=$(grep -v '^#' "$config" | grep -v '^$' \
         | sed "s|$HOME|~|g" \
         | awk -F'|' '{printf "%-12s >  %s\n", $1, $2}' \
-        | fzf --prompt='rm > TAB to multi-select, Enter to remove > ' --multi --height=~50% --reverse --no-info)
+        | fzf --prompt='rm > TAB to multi-select, Enter to remove > ' --multi --height=~50% --reverse --no-info \
+              --preview 'dir="$(echo {} | sed "s/.*>  //" | sed "s|~|'"$HOME"'|")"; ls -1pF "$dir" 2>/dev/null || echo "Directory does not exist"')
       if [[ -z "$picks" ]]; then
         echo "goto: nothing selected"
         return
       fi
       echo "$picks" | while IFS= read -r line; do
         local name="${line%%[[:space:]]*}"
-        sed -i '' "/^$name|/d" "$config"
-        echo "removed: $name"
+        sed -i '' "/^${name}|/d" "$config"
+        echo "${_red}removed:${_reset} $name"
       done
+    fi
+    return
+  fi
+
+  if [[ "$1" == "clean" ]]; then
+    local cleaned=0
+    local tmpfile=$(mktemp)
+    while IFS= read -r line; do
+      if [[ "$line" == \#* || -z "$line" ]]; then
+        echo "$line" >> "$tmpfile"
+        continue
+      fi
+      local path="${line#*|}"
+      local full="${path/#\~/$HOME}"
+      if [[ -d "$full" ]]; then
+        echo "$line" >> "$tmpfile"
+      else
+        echo "${_red}removed:${_reset} $line ${_dim}(directory missing)${_reset}"
+        ((cleaned++))
+      fi
+    done < "$config"
+    mv "$tmpfile" "$config"
+    if (( cleaned == 0 )); then
+      echo "${_green}goto: all entries are valid${_reset}"
+    else
+      local word=$(( cleaned == 1 )) && word="entry" || word="entries"
+      echo "${_green}cleaned $cleaned stale $word${_reset}"
     fi
     return
   fi
@@ -117,7 +153,7 @@ goto() {
 
     local histfile="${HISTFILE:-$HOME/.zsh_history}"
     if [[ ! -f "$histfile" ]]; then
-      echo "goto: history file not found: $histfile" >&2
+      echo "${_red}goto: history file not found: $histfile${_reset}" >&2
       return 1
     fi
 
@@ -150,7 +186,7 @@ goto() {
     fi
 
     if ! command -v fzf >/dev/null 2>&1; then
-      echo "goto: fzf is required for interactive selection. Install: brew install fzf" >&2
+      echo "${_red}goto: fzf is required for interactive selection. Install: brew install fzf${_reset}" >&2
       return 1
     fi
 
@@ -170,26 +206,119 @@ goto() {
       [[ -d "$full" ]] || continue
       local name="${full##*/}"
       echo "$name|$dir" >> "$config"
-      echo "added: $name -> $dir"
+      echo "${_green}added:${_reset} $name -> $dir"
     done
     return
   fi
 
+  # --- direct jump by name ---
+  if [[ -n "$1" ]]; then
+    local match
+    match=$(grep "^$1|" "$config" | head -1)
+    if [[ -n "$match" ]]; then
+      local dir="${match#*|}"
+      dir="${dir/#\~/$HOME}"
+      if [[ -d "$dir" ]]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')  $dir" >> "$logfile"
+        cd "$dir" || return 1
+      else
+        echo "${_red}goto: directory no longer exists: $dir${_reset}" >&2
+        read -r "answer?Remove '$1' from config? [y/N] "
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+          sed -i '' "/^$1|/d" "$config"
+          echo "${_red}removed:${_reset} $1"
+        fi
+        return 1
+      fi
+      return
+    fi
+    # no exact match: fall through to fzf with $1 as initial query
+  fi
+
+  # --- interactive picker (sorted by jump frequency) ---
   if ! command -v fzf >/dev/null 2>&1; then
-    echo "goto: fzf is required. Install: brew install fzf" >&2
+    echo "${_red}goto: fzf is required. Install: brew install fzf${_reset}" >&2
     return 1
   fi
 
+  local display
+  if [[ -f "$logfile" ]]; then
+    # sort entries by jump frequency (most frequent first)
+    display=$(grep -v '^#' "$config" | grep -v '^$' \
+      | sed "s|~|$HOME|g" \
+      | while IFS='|' read -r name path; do
+          local count
+          count=$(grep -c "  ${path}$" "$logfile" 2>/dev/null)
+          count=${count:-0}
+          local short="${path/#$HOME/\~}"
+          printf "%06d\t%-12s >  %s\n" "$count" "$name" "$short"
+        done \
+      | sort -t$'\t' -k1 -rn \
+      | cut -f2-)
+  else
+    display=$(grep -v '^#' "$config" | grep -v '^$' \
+      | sed "s|$HOME|~|g" \
+      | awk -F'|' '{printf "%-12s >  %s\n", $1, $2}')
+  fi
+
+  local query="${1:-}"
   local selected
-  selected=$(grep -v '^#' "$config" | grep -v '^$' \
-    | sed "s|$HOME|~|g" \
-    | awk -F'|' '{printf "%-12s >  %s\n", $1, $2}' \
-    | fzf --prompt='goto > ' --no-multi --height=~50% --reverse --no-info)
+  selected=$(echo "$display" \
+    | fzf --prompt='goto > ' --no-multi --height=~50% --reverse --no-info \
+          --query="$query" \
+          --preview 'dir="$(echo {} | sed "s/.*>  //" | sed "s|~|'"$HOME"'|")"; ls -1pF "$dir" 2>/dev/null || echo "Directory does not exist"')
 
   if [[ -n "$selected" ]]; then
     local dir="${selected#*>  }"
     dir="${dir/#\~/$HOME}"
-    echo "$(date '+%Y-%m-%d %H:%M:%S')  $dir" >> "$logfile"
-    cd "$dir" || return 1
+    if [[ -d "$dir" ]]; then
+      echo "$(date '+%Y-%m-%d %H:%M:%S')  $dir" >> "$logfile"
+      cd "$dir" || return 1
+    else
+      echo "${_red}goto: directory no longer exists: $dir${_reset}" >&2
+      local name="${selected%%[[:space:]]*}"
+      read -r "answer?Remove '$name' from config? [y/N] "
+      if [[ "$answer" =~ ^[Yy]$ ]]; then
+        sed -i '' "/^${name}|/d" "$config"
+        echo "${_red}removed:${_reset} $name"
+      fi
+      return 1
+    fi
   fi
 }
+
+# --- zsh tab completion ---
+_goto() {
+  local config="${GOTO_CONFIG:-$HOME/.config/goto/dirs}"
+
+  if (( CURRENT == 2 )); then
+    local -a subcmds=(
+      'add:add a directory'
+      'rm:remove a directory'
+      'list:list all saved directories'
+      'clean:remove stale entries'
+      'scan:scan shell history for frequent dirs'
+      'log:show recent jumps'
+      'help:show help'
+    )
+    local -a names=()
+    if [[ -f "$config" ]]; then
+      names=(${(f)"$(grep -v '^#' "$config" | grep -v '^$' | awk -F'|' '{print $1}')"})
+    fi
+    _describe 'command' subcmds
+    compadd -a names
+  elif (( CURRENT == 3 )); then
+    case "${words[2]}" in
+      add)
+        _directories ;;
+      rm|remove)
+        local -a names=()
+        if [[ -f "$config" ]]; then
+          names=(${(f)"$(grep -v '^#' "$config" | grep -v '^$' | awk -F'|' '{print $1}')"})
+        fi
+        compadd -a names ;;
+    esac
+  fi
+}
+
+compdef _goto goto
